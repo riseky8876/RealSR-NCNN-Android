@@ -1,0 +1,130 @@
+name: Build APK with Colorize
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install tools
+        run: sudo apt-get update -q && sudo apt-get install -y cmake ninja-build unzip wget
+
+      # ── Setup 3rdparty libs ───────────────────────────────────────────
+      - name: Setup ncnn
+        run: |
+          mkdir -p 3rdparty/ncnn
+          wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android-vulkan.zip
+          unzip -q ncnn-20230816-android-vulkan.zip
+          cp -r ncnn-20230816-android-vulkan/* 3rdparty/ncnn/
+          echo "ncnn ready ✓"
+
+      - name: Setup OpenCV
+        run: |
+          mkdir -p 3rdparty/opencv
+          wget -q https://github.com/opencv/opencv/releases/download/4.6.0/opencv-4.6.0-android-sdk.zip
+          unzip -q opencv-4.6.0-android-sdk.zip
+          # Map OpenCV structure: opencv/{ABI}/sdk/native/jni
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            mkdir -p 3rdparty/opencv/$abi
+            cp -r OpenCV-android-sdk/* 3rdparty/opencv/$abi/
+          done
+          echo "OpenCV ready ✓"
+
+      # ── Build colorize-ncnn binary ────────────────────────────────────
+      - name: Build colorize-ncnn
+        run: |
+          mkdir -p colorize-ncnn/build
+          cmake -S colorize-ncnn/src/main/jni \
+                -B colorize-ncnn/build \
+                -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+                -DANDROID_ABI=arm64-v8a \
+                -DANDROID_PLATFORM=android-21 \
+                -DANDROID_STL=c++_static \
+                -DCMAKE_BUILD_TYPE=Release \
+                -G Ninja
+          cmake --build colorize-ncnn/build -j$(nproc)
+          ls -lh colorize-ncnn/build/colorize-ncnn
+          echo "colorize-ncnn built ✓"
+
+      # ── Copy binary to GUI assets ─────────────────────────────────────
+      - name: Copy binary to assets
+        run: |
+          ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
+          mkdir -p "$ASSETS"
+          cp colorize-ncnn/build/colorize-ncnn "$ASSETS/colorize-ncnn"
+          chmod +x "$ASSETS/colorize-ncnn"
+          ls -lh "$ASSETS/colorize-ncnn"
+          echo "Binary in assets ✓"
+
+      # ── Download colourisation model ──────────────────────────────────
+      - name: Download colourisation model
+        run: |
+          ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
+          mkdir -p "$ASSETS/colorize-models"
+          wget -q --tries=3 \
+            "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.param" \
+            -O "$ASSETS/colorize-models/siggraph17_color_sim.param"
+          wget -q --tries=3 \
+            "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.bin" \
+            -O "$ASSETS/colorize-models/siggraph17_color_sim.bin"
+          echo "=== Model sizes ==="
+          ls -lh "$ASSETS/colorize-models/"
+          # Verify model is not corrupt
+          size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin" 2>/dev/null || echo 0)
+          if [ "$size" -lt 1000000 ]; then
+            echo "ERROR: siggraph17 model too small ($size bytes)"
+            exit 1
+          fi
+          echo "Models ready ✓"
+
+      # ── Setup existing 3rdparty (ncnn-android-vulkan-shared) ──────────
+      - name: Setup realsr 3rdparty
+        run: |
+          # Copy ncnn vulkan shared libs to where GUI expects them
+          mkdir -p 3rdparty/ncnn-android-vulkan-shared
+          cp -r ncnn-20230816-android-vulkan/* 3rdparty/ncnn-android-vulkan-shared/ 2>/dev/null || true
+          ls 3rdparty/
+
+      # ── Build GUI APK ─────────────────────────────────────────────────
+      - name: Build APK
+        run: |
+          cd RealSR-NCNN-Android-GUI
+          chmod +x gradlew
+          # Use the existing gradlew (it already has valid wrapper jar)
+          ./gradlew assembleRelease --no-daemon --stacktrace -x test
+          echo "APK built ✓"
+          find . -name "*.apk" | xargs ls -lh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealSR-Colorize
+          path: RealSR-NCNN-Android-GUI/app/build/outputs/apk/**/*.apk
+
+      - name: Create Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "Build #${{ github.run_number }} — RealSR + Colorize"
+          files: RealSR-NCNN-Android-GUI/app/build/outputs/apk/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
