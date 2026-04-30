@@ -53,6 +53,17 @@
             android:text="@string/save" />
 
 
+
+        <Button
+            android:id="@+id/btn_colorize"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginHorizontal="3dp"
+            android:layout_weight="1"
+            android:lines="1"
+            android:text="@string/colorize" />
+
     </LinearLayout>
 
     <Spinner
