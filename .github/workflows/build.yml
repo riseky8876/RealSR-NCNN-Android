@@ -60,7 +60,6 @@ jobs:
           ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
           mkdir -p "$ASSETS/colorize-models"
           cp colorize-build/colorize-ncnn "$ASSETS/colorize-ncnn"
-
           MODEL_REPO="riseky8876/pictureupgrader"
           TAG=$(gh release list --repo "$MODEL_REPO" --limit 5 \
                 --json tagName --jq '.[].tagName' | while read t; do
@@ -74,23 +73,88 @@ jobs:
             --pattern "siggraph17_color_sim.*" \
             --dir "$ASSETS/colorize-models" \
             --clobber
-
           ls -lh "$ASSETS/colorize-models/"
           size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin" 2>/dev/null || echo 0)
           [ "$size" -lt 1000000 ] && echo "ERROR: model too small ($size bytes)" && exit 1
           echo "Assets ready ✓"
 
-      - name: Patch strings.xml — add colorize string
+      - name: Patch strings.xml
         run: |
           STRINGS=RealSR-NCNN-Android-GUI/app/src/main/res/values/strings.xml
-          # Only add if not already present
-          if ! grep -q 'name="colorize"' "$STRINGS"; then
-            sed -i 's|</resources>|    <string name="colorize">Colorize</string>\n</resources>|' "$STRINGS"
-            echo "Added colorize string ✓"
-          else
-            echo "colorize string already exists ✓"
-          fi
-          grep "colorize" "$STRINGS"
+          python3 - "$STRINGS" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+# All strings/arrays needed by the newer version of the app
+new_strings = """
+    <string name="colorize">Colorize</string>
+    <string name="dir_menu_entry">Batch Process</string>
+    <string name="dir_process_title">Batch Process</string>
+    <string name="dir_input_label">Input Directory</string>
+    <string name="dir_select_btn">Select</string>
+    <string name="dir_input_hint">Select input directory</string>
+    <string name="dir_output_label">Output Directory</string>
+    <string name="dir_output_hint">Select output directory</string>
+    <string name="dir_auto_output_label">Auto output directory</string>
+    <string name="dir_model_label">Model</string>
+    <string name="dir_start_btn">Start</string>
+    <string name="dir_stop_btn">Stop</string>
+    <string name="dir_log_hint">Log will appear here</string>
+    <string name="dir_input_invalid">Invalid input directory</string>
+    <string name="dir_input_path_error">Input path error</string>
+    <string name="dir_output_path_error">Output path error</string>
+    <string name="dir_model_error">Model error</string>
+    <string name="dir_no_selected">No file selected</string>
+    <string name="dir_no_supported_commands">No supported commands</string>
+    <string name="dir_service_error">Service error</string>
+    <string name="dir_log_starting">Starting...</string>
+    <string name="dir_log_complete">Complete</string>
+    <string name="dir_log_output_to">Output to:</string>
+    <string name="dir_file_count">File count:</string>
+    <string name="dir_select_input_prompt">Select input folder</string>
+    <string name="dir_select_output_prompt">Select output folder</string>
+    <string name="dir_auto_output_format">Auto</string>
+    <string name="dir_output_format">Output format</string>
+    <string name="hide_programs_title">Hide programs</string>
+    <string name="hide_realsr">Hide RealSR</string>
+    <string name="hide_srmd">Hide SRMD</string>
+    <string name="hide_realcugan">Hide RealCUGAN</string>
+    <string name="hide_waifu">Hide Waifu2x</string>
+    <string name="hide_resize">Hide Resize</string>
+    <string name="hide_magick">Hide ImageMagick</string>
+    <string name="hide_anime">Hide Anime4k</string>
+    <string name="hide_mnnsr">Hide MNNSR</string>
+    <string name="save_name">Save name</string>
+    <string name="save_name3">Save name (3rd)</string>
+    <string-array name="dir_output_format">
+        <item>jpg</item>
+        <item>png</item>
+        <item>webp</item>
+    </string-array>
+    <string-array name="name3">
+        <item>Default</item>
+        <item>Custom</item>
+        <item>Date</item>
+    </string-array>
+"""
+
+# Add only strings that don't already exist
+for match in re.finditer(r'name="([^"]+)"', new_strings):
+    name = match.group(1)
+    if f'name="{name}"' in content:
+        print(f"  skip (exists): {name}")
+        new_strings = re.sub(
+            r'[ \t]*<(?:string|string-array)[^>]*name="' + name + r'"[^>]*>.*?</(?:string|string-array)>\n',
+            '', new_strings, flags=re.DOTALL)
+
+content = content.replace('</resources>', new_strings + '</resources>')
+with open(path, 'w') as f:
+    f.write(content)
+print("strings.xml patched ✓")
+PYEOF
 
       - name: Setup realsr 3rdparty
         run: |
