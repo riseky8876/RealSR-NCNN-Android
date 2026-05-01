@@ -2,10 +2,22 @@
 """Generates colorize-ncnn C++ sources into colorize-src/"""
 import sys, os
 
-ncnn_dir  = sys.argv[1]
-opencv_dir = sys.argv[2]
+# Convert to absolute paths — CMake requires absolute paths for *_DIR variables
+ncnn_dir   = os.path.abspath(sys.argv[1])
+opencv_dir = os.path.abspath(sys.argv[2])
 
 os.makedirs("colorize-src", exist_ok=True)
+
+print(f"ncnn_DIR  (abs): {ncnn_dir}")
+print(f"opencv_DIR (abs): {opencv_dir}")
+
+# Verify the config files actually exist
+ncnn_cfg   = os.path.join(ncnn_dir,   "ncnnConfig.cmake")
+opencv_cfg = os.path.join(opencv_dir, "OpenCVConfig.cmake")
+if not os.path.exists(ncnn_cfg):
+    print(f"ERROR: {ncnn_cfg} not found!", file=sys.stderr); sys.exit(1)
+if not os.path.exists(opencv_cfg):
+    print(f"ERROR: {opencv_cfg} not found!", file=sys.stderr); sys.exit(1)
 
 # ── CMakeLists.txt ────────────────────────────────────────────────────────────
 cmake = (
@@ -26,7 +38,7 @@ cmake = (
 )
 open("colorize-src/CMakeLists.txt","w").write(cmake)
 
-# ── colorize_impl.cpp (compiled with -fno-rtti) ───────────────────────────────
+# ── colorize_impl.cpp ─────────────────────────────────────────────────────────
 impl = (
     "#include <cstdio>\n"
     "#include <cstring>\n"
@@ -70,7 +82,7 @@ impl = (
 )
 open("colorize-src/colorize_impl.cpp","w").write(impl)
 
-# ── main.cpp (compiled with -frtti, uses OpenCV) ─────────────────────────────
+# ── main.cpp ──────────────────────────────────────────────────────────────────
 main = (
     "#include <cstdio>\n"
     "#include <cstring>\n"
@@ -112,6 +124,3 @@ main = (
 open("colorize-src/main.cpp","w").write(main)
 
 print("colorize-src generated OK")
-print(f"  CMakeLists.txt  ncnn={ncnn_dir}")
-print(f"  colorize_impl.cpp")
-print(f"  main.cpp")
