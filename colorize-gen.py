@@ -27,6 +27,7 @@ cmake = (
     f'set(ncnn_DIR "{ncnn_dir}")\n'
     f'set(OpenCV_DIR "{opencv_dir}")\n'
     "find_package(ncnn REQUIRED)\n"
+    "set_target_properties(ncnn PROPERTIES INTERFACE_COMPILE_OPTIONS \"\")\n"
     "find_package(OpenCV REQUIRED core imgproc imgcodecs)\n"
     'set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -frtti -fopenmp -Os")\n'
     "if(DEFINED ANDROID_NDK_MAJOR AND ${ANDROID_NDK_MAJOR} GREATER 20)\n"
