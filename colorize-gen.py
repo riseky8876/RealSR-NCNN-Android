@@ -28,7 +28,7 @@ cmake = (
     f'set(OpenCV_DIR "{opencv_dir}")\n'
     "find_package(ncnn REQUIRED)\n"
     "find_package(OpenCV REQUIRED core imgproc imgcodecs)\n"
-    'set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fopenmp -Os -fvisibility=hidden")\n'
+    'set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -frtti -fopenmp -Os")\n'
     "if(DEFINED ANDROID_NDK_MAJOR AND ${ANDROID_NDK_MAJOR} GREATER 20)\n"
     '    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-openmp")\n'
     "endif()\n"
