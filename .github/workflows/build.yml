@@ -65,8 +65,8 @@ jobs:
           ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
           mkdir -p "$ASSETS/colorize-models"
           cp colorize-build/colorize-ncnn "$ASSETS/colorize-ncnn"
-          wget -q --tries=3 "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.param" -O "$ASSETS/colorize-models/siggraph17_color_sim.param"
-          wget -q --tries=3 "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.bin" -O "$ASSETS/colorize-models/siggraph17_color_sim.bin"
+          curl -sL "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.param" -o "$ASSETS/colorize-models/siggraph17_color_sim.param"
+          curl -sL "https://github.com/nihui/ncnn-assets/raw/master/models/siggraph17_color_sim.bin" -o "$ASSETS/colorize-models/siggraph17_color_sim.bin"
           ls -lh "$ASSETS/colorize-models/"
           size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin")
           [ "$size" -lt 1000000 ] && echo "ERROR: model too small" && exit 1
