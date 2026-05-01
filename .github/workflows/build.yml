@@ -31,22 +31,24 @@ jobs:
         run: |
           wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android-vulkan.zip
           unzip -q ncnn-20230816-android-vulkan.zip
+          # Copy to where the project expects it
+          mkdir -p 3rdparty/ncnn-android-vulkan-shared
+          cp -r ncnn-20230816-android-vulkan/* 3rdparty/ncnn-android-vulkan-shared/
+
           wget -q https://github.com/opencv/opencv/releases/download/4.6.0/opencv-4.6.0-android-sdk.zip
           unzip -q opencv-4.6.0-android-sdk.zip
-          echo "ncnn cmake:" && find ncnn-20230816-android-vulkan -name "ncnnConfig.cmake"
-          echo "opencv cmake:" && find OpenCV-android-sdk -name "OpenCVConfig.cmake"
 
-      - name: Generate colorize sources
+          echo "=== ncnn structure ==="
+          find 3rdparty/ncnn-android-vulkan-shared -name "ncnnConfig.cmake" | sort
+          echo "=== opencv structure ==="
+          find OpenCV-android-sdk -name "OpenCVConfig.cmake" | sort
+
+      - name: Generate and build colorize-ncnn
         run: |
-          mkdir -p colorize-src
-          NCNN_DIR=$(dirname "$(find ncnn-20230816-android-vulkan -name 'ncnnConfig.cmake' | grep arm64 | head -1)")
-          OPENCV_DIR=$(dirname "$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | head -1)")
-          echo "NCNN=$NCNN_DIR OPENCV=$OPENCV_DIR"
+          python3 colorize-gen.py \
+            "$(find 3rdparty/ncnn-android-vulkan-shared -name 'ncnnConfig.cmake' | grep arm64 | head -1 | xargs dirname)" \
+            "$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | head -1 | xargs dirname)"
 
-          python3 colorize-gen.py "$NCNN_DIR" "$OPENCV_DIR"
-
-      - name: Build colorize-ncnn
-        run: |
           mkdir -p colorize-build
           cmake -S colorize-src -B colorize-build \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
@@ -57,6 +59,7 @@ jobs:
             -G Ninja
           cmake --build colorize-build -j$(nproc)
           ls -lh colorize-build/colorize-ncnn
+          echo "colorize-ncnn built ✓"
 
       - name: Copy binary and model to assets
         run: |
@@ -68,12 +71,7 @@ jobs:
           ls -lh "$ASSETS/colorize-models/"
           size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin")
           [ "$size" -lt 1000000 ] && echo "ERROR: model too small" && exit 1
-          echo "Assets ready"
-
-      - name: Setup realsr 3rdparty
-        run: |
-          mkdir -p 3rdparty/ncnn-android-vulkan-shared
-          cp -r ncnn-20230816-android-vulkan/* 3rdparty/ncnn-android-vulkan-shared/ 2>/dev/null || true
+          echo "Assets ready ✓"
 
       - name: Build APK
         run: |
