@@ -31,131 +31,125 @@ jobs:
         run: |
           wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android-vulkan.zip
           unzip -q ncnn-20230816-android-vulkan.zip
-          echo "=== ncnn structure ==="
-          find ncnn-20230816-android-vulkan -name "ncnnConfig.cmake" | head -5
-          find ncnn-20230816-android-vulkan -name "*.cmake" | head -10
 
       - name: Setup OpenCV
         run: |
           wget -q https://github.com/opencv/opencv/releases/download/4.6.0/opencv-4.6.0-android-sdk.zip
           unzip -q opencv-4.6.0-android-sdk.zip
-          echo "=== OpenCV structure ==="
-          find OpenCV-android-sdk -name "OpenCVConfig.cmake" | head -5
 
-      # ── Write C++ sources + CMakeLists ───────────────────────────────
-      - name: Create colorize-ncnn sources
+      - name: Write colorize C++ sources
         run: |
           mkdir -p colorize-src
 
-          # Detect actual ncnn cmake path
-          NCNN_CMAKE=$(find ncnn-20230816-android-vulkan -name "ncnnConfig.cmake" \
-                       | grep arm64-v8a | head -1)
-          NCNN_DIR=$(dirname "$NCNN_CMAKE")
+          # Detect paths
+          NCNN_DIR=$(dirname "$(find ncnn-20230816-android-vulkan -name 'ncnnConfig.cmake' | grep arm64 | head -1)")
+          OPENCV_DIR=$(dirname "$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | grep arm64 | head -1 || find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | head -1)")
           echo "ncnn_DIR=$NCNN_DIR"
-
-          OPENCV_CMAKE=$(find OpenCV-android-sdk -name "OpenCVConfig.cmake" \
-                         | grep arm64-v8a | head -1 || \
-                         find OpenCV-android-sdk -name "OpenCVConfig.cmake" | head -1)
-          OPENCV_DIR=$(dirname "$OPENCV_CMAKE")
           echo "opencv_DIR=$OPENCV_DIR"
 
-          cat > colorize-src/CMakeLists.txt << EOF
-          cmake_minimum_required(VERSION 3.22)
-          project(colorize-ncnn)
-          set(CMAKE_CXX_STANDARD 17)
-          set(ncnn_DIR "$NCNN_DIR")
-          set(OpenCV_DIR "$OPENCV_DIR")
-          find_package(ncnn REQUIRED)
-          find_package(OpenCV REQUIRED core imgproc imgcodecs)
-          set(CMAKE_CXX_FLAGS "\${CMAKE_CXX_FLAGS} -fexceptions -fopenmp -Os -fvisibility=hidden")
-          if(DEFINED ANDROID_NDK_MAJOR AND \${ANDROID_NDK_MAJOR} GREATER 20)
-              set(CMAKE_EXE_LINKER_FLAGS "\${CMAKE_EXE_LINKER_FLAGS} -static-openmp")
-          endif()
-          add_executable(colorize-ncnn main.cpp colorize_impl.cpp)
-          set_source_files_properties(colorize_impl.cpp PROPERTIES COMPILE_FLAGS "-fno-rtti")
-          target_link_libraries(colorize-ncnn ncnn \${OpenCV_LIBS})
-          EOF
+          # Write CMakeLists.txt
+          {
+            echo 'cmake_minimum_required(VERSION 3.22)'
+            echo 'project(colorize-ncnn)'
+            echo 'set(CMAKE_CXX_STANDARD 17)'
+            echo "set(ncnn_DIR \"$NCNN_DIR\")"
+            echo "set(OpenCV_DIR \"$OPENCV_DIR\")"
+            echo 'find_package(ncnn REQUIRED)'
+            echo 'find_package(OpenCV REQUIRED core imgproc imgcodecs)'
+            echo 'set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -fopenmp -Os -fvisibility=hidden")'
+            echo 'if(DEFINED ANDROID_NDK_MAJOR AND ${ANDROID_NDK_MAJOR} GREATER 20)'
+            echo '    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-openmp")'
+            echo 'endif()'
+            echo 'add_executable(colorize-ncnn main.cpp colorize_impl.cpp)'
+            echo 'set_source_files_properties(colorize_impl.cpp PROPERTIES COMPILE_FLAGS "-fno-rtti")'
+            echo 'target_link_libraries(colorize-ncnn ncnn ${OpenCV_LIBS})'
+          } > colorize-src/CMakeLists.txt
 
-          cat > colorize-src/colorize_impl.cpp << 'CPPEOF'
-#include <cstdio>
-#include <cstring>
-#include <string>
-#include <net.h>
-#include <layer.h>
-class Sig17Slice : public ncnn::Layer {
-public:
-    Sig17Slice() { one_blob_only = true; }
-    int forward(const ncnn::Mat& b, ncnn::Mat& t, const ncnn::Option& opt) const override {
-        int w=b.w,h=b.h,c=b.c,ow=w/2,oh=h/2;
-        t.create(ow,oh,c,4u,1,opt.blob_allocator);
-        if(t.empty())return -100;
-        for(int p=0;p<c;p++){
-            const float* ptr=b.channel(p%c).row((p/c)%2)+((p/c)/2);
-            float* o=t.channel(p);
-            for(int i=0;i<oh;i++){for(int j=0;j<ow;j++){*o++=*ptr;ptr+=2;}ptr+=w;}
-        }
-        return 0;
-    }
-};
-DEFINE_LAYER_CREATOR(Sig17Slice)
-extern "C" int colorize_run(const float* L256, float* ab_out, const char* model_dir) {
-    ncnn::Net net;
-    net.opt.use_vulkan_compute=false;
-    net.opt.num_threads=2;
-    net.register_custom_layer("Sig17Slice",Sig17Slice_layer_creator);
-    std::string mp(model_dir);
-    if(net.load_param((mp+"/siggraph17_color_sim.param").c_str()))return -1;
-    if(net.load_model((mp+"/siggraph17_color_sim.bin").c_str()))return -1;
-    ncnn::Mat in(256,256,1,(void*)L256); in=in.clone();
-    ncnn::Extractor ex=net.create_extractor();
-    ex.input("input",in); ncnn::Mat out; ex.extract("out_ab",out);
-    if(out.empty())return -2;
-    int n=out.w*out.h;
-    memcpy(ab_out,out.data,n*sizeof(float));
-    memcpy(ab_out+n,(float*)out.data+n,n*sizeof(float));
-    ab_out[n*2]=(float)out.w; ab_out[n*2+1]=(float)out.h;
-    return 0;
-}
-CPPEOF
+          # Write colorize_impl.cpp
+          {
+            echo '#include <cstdio>'
+            echo '#include <cstring>'
+            echo '#include <string>'
+            echo '#include <net.h>'
+            echo '#include <layer.h>'
+            echo 'class Sig17Slice : public ncnn::Layer {'
+            echo 'public:'
+            echo '    Sig17Slice() { one_blob_only = true; }'
+            echo '    int forward(const ncnn::Mat& b, ncnn::Mat& t, const ncnn::Option& opt) const override {'
+            echo '        int w=b.w,h=b.h,c=b.c,ow=w/2,oh=h/2;'
+            echo '        t.create(ow,oh,c,4u,1,opt.blob_allocator);'
+            echo '        if(t.empty())return -100;'
+            echo '        for(int p=0;p<c;p++){'
+            echo '            const float* ptr=b.channel(p%c).row((p/c)%2)+((p/c)/2);'
+            echo '            float* o=t.channel(p);'
+            echo '            for(int i=0;i<oh;i++){for(int j=0;j<ow;j++){*o++=*ptr;ptr+=2;}ptr+=w;}'
+            echo '        }'
+            echo '        return 0;'
+            echo '    }'
+            echo '};'
+            echo 'DEFINE_LAYER_CREATOR(Sig17Slice)'
+            echo 'extern "C" int colorize_run(const float* L256, float* ab_out, const char* model_dir) {'
+            echo '    ncnn::Net net;'
+            echo '    net.opt.use_vulkan_compute=false;'
+            echo '    net.opt.num_threads=2;'
+            echo '    net.register_custom_layer("Sig17Slice",Sig17Slice_layer_creator);'
+            echo '    std::string mp(model_dir);'
+            echo '    if(net.load_param((mp+"/siggraph17_color_sim.param").c_str()))return -1;'
+            echo '    if(net.load_model((mp+"/siggraph17_color_sim.bin").c_str()))return -1;'
+            echo '    ncnn::Mat in(256,256,1,(void*)L256); in=in.clone();'
+            echo '    ncnn::Extractor ex=net.create_extractor();'
+            echo '    ex.input("input",in); ncnn::Mat out; ex.extract("out_ab",out);'
+            echo '    if(out.empty())return -2;'
+            echo '    int n=out.w*out.h;'
+            echo '    memcpy(ab_out,out.data,n*sizeof(float));'
+            echo '    memcpy(ab_out+n,(float*)out.data+n,n*sizeof(float));'
+            echo '    ab_out[n*2]=(float)out.w; ab_out[n*2+1]=(float)out.h;'
+            echo '    return 0;'
+            echo '}'
+          } > colorize-src/colorize_impl.cpp
 
-          cat > colorize-src/main.cpp << 'CPPEOF'
-#include <cstdio>
-#include <cstring>
-#include <string>
-#include <vector>
-#include <opencv2/opencv.hpp>
-extern "C" int colorize_run(const float* L256, float* ab_out, const char* model_dir);
-int main(int argc, char** argv) {
-    std::string input,output,model_dir; bool verbose=false;
-    for(int i=1;i<argc;i++){
-        if(!strcmp(argv[i],"-i")&&i+1<argc)input=argv[++i];
-        else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];
-        else if(!strcmp(argv[i],"-m")&&i+1<argc)model_dir=argv[++i];
-        else if(!strcmp(argv[i],"-v"))verbose=true;
-    }
-    if(input.empty()||output.empty()||model_dir.empty()){
-        fprintf(stderr,"Usage: colorize-ncnn -i input -o output -m model_dir\n");return 1;}
-    cv::Mat bgr=cv::imread(input,cv::IMREAD_COLOR);
-    if(bgr.empty()){fprintf(stderr,"failed to read %s\n",input.c_str());return 1;}
-    cv::Mat base; bgr.convertTo(base,CV_32F,1.0/255.0);
-    cv::Mat lab; cvtColor(base,lab,cv::COLOR_BGR2Lab);
-    cv::Mat L; cv::extractChannel(lab,L,0);
-    cv::Mat L256; cv::resize(L,L256,cv::Size(256,256));
-    const int MAX=256*256;
-    std::vector<float> ab(MAX*2+2,0.f);
-    int ret=colorize_run((const float*)L256.data,ab.data(),model_dir.c_str());
-    if(ret<0){fprintf(stderr,"inference failed %d\n",ret);return 1;}
-    int nw=(int)ab[MAX*2],nh=(int)ab[MAX*2+1],np=nw*nh;
-    cv::Mat a(nh,nw,CV_32F,ab.data()),b(nh,nw,CV_32F,ab.data()+np);
-    cv::resize(a,a,bgr.size()); cv::resize(b,b,bgr.size());
-    cv::Mat chn[]={L,a,b},lo; cv::merge(chn,3,lo);
-    cv::Mat color; cvtColor(lo,color,cv::COLOR_Lab2BGR);
-    cv::Mat out8; color.convertTo(out8,CV_8UC3,255.0);
-    if(!cv::imwrite(output,out8)){fprintf(stderr,"write failed\n");return 1;}
-    if(verbose)fprintf(stderr,"saved %s\n",output.c_str());
-    return 0;
-}
-CPPEOF
+          # Write main.cpp
+          {
+            echo '#include <cstdio>'
+            echo '#include <cstring>'
+            echo '#include <string>'
+            echo '#include <vector>'
+            echo '#include <opencv2/opencv.hpp>'
+            echo 'extern "C" int colorize_run(const float* L256, float* ab_out, const char* model_dir);'
+            echo 'int main(int argc, char** argv) {'
+            echo '    std::string input,output,model_dir; bool verbose=false;'
+            echo '    for(int i=1;i<argc;i++){'
+            echo '        if(!strcmp(argv[i],"-i")&&i+1<argc)input=argv[++i];'
+            echo '        else if(!strcmp(argv[i],"-o")&&i+1<argc)output=argv[++i];'
+            echo '        else if(!strcmp(argv[i],"-m")&&i+1<argc)model_dir=argv[++i];'
+            echo '        else if(!strcmp(argv[i],"-v"))verbose=true;'
+            echo '    }'
+            echo '    if(input.empty()||output.empty()||model_dir.empty()){'
+            echo '        fprintf(stderr,"Usage: colorize-ncnn -i input -o output -m model_dir\n");return 1;}'
+            echo '    cv::Mat bgr=cv::imread(input,cv::IMREAD_COLOR);'
+            echo '    if(bgr.empty()){fprintf(stderr,"failed to read input\n");return 1;}'
+            echo '    cv::Mat base; bgr.convertTo(base,CV_32F,1.0/255.0);'
+            echo '    cv::Mat lab; cvtColor(base,lab,cv::COLOR_BGR2Lab);'
+            echo '    cv::Mat L; cv::extractChannel(lab,L,0);'
+            echo '    cv::Mat L256; cv::resize(L,L256,cv::Size(256,256));'
+            echo '    const int MAX=256*256;'
+            echo '    std::vector<float> ab(MAX*2+2,0.f);'
+            echo '    int ret=colorize_run((const float*)L256.data,ab.data(),model_dir.c_str());'
+            echo '    if(ret<0){fprintf(stderr,"inference failed %d\n",ret);return 1;}'
+            echo '    int nw=(int)ab[MAX*2],nh=(int)ab[MAX*2+1],np=nw*nh;'
+            echo '    cv::Mat a(nh,nw,CV_32F,ab.data()),b(nh,nw,CV_32F,ab.data()+np);'
+            echo '    cv::resize(a,a,bgr.size()); cv::resize(b,b,bgr.size());'
+            echo '    cv::Mat chn[]={L,a,b},lo; cv::merge(chn,3,lo);'
+            echo '    cv::Mat color; cvtColor(lo,color,cv::COLOR_Lab2BGR);'
+            echo '    cv::Mat out8; color.convertTo(out8,CV_8UC3,255.0);'
+            echo '    if(!cv::imwrite(output,out8)){fprintf(stderr,"write failed\n");return 1;}'
+            echo '    if(verbose)fprintf(stderr,"saved %s\n",output.c_str());'
+            echo '    return 0;'
+            echo '}'
+          } > colorize-src/main.cpp
+
+          echo "Sources written ✓"
+          ls colorize-src/
 
       - name: Build colorize-ncnn
         run: |
@@ -172,7 +166,7 @@ CPPEOF
           ls -lh colorize-build/colorize-ncnn
           echo "colorize-ncnn built ✓"
 
-      - name: Copy binary + model to assets
+      - name: Copy binary and model to assets
         run: |
           ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
           mkdir -p "$ASSETS/colorize-models"
@@ -185,7 +179,7 @@ CPPEOF
             -O "$ASSETS/colorize-models/siggraph17_color_sim.bin"
           ls -lh "$ASSETS/colorize-models/"
           size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin")
-          [ "$size" -lt 1000000 ] && echo "ERROR: model too small ($size bytes)" && exit 1
+          [ "$size" -lt 1000000 ] && echo "ERROR: model too small" && exit 1
           echo "Assets ready ✓"
 
       - name: Setup realsr 3rdparty
