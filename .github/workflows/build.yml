@@ -29,25 +29,24 @@ jobs:
 
       - name: Setup ncnn and OpenCV
         run: |
-          wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android-vulkan.zip
-          unzip -q ncnn-20230816-android-vulkan.zip
-          # Copy to where the project expects it
+          # Use ncnn WITHOUT Vulkan to avoid Vulkan SDK dependency on CI
+          wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android.zip
+          unzip -q ncnn-20230816-android.zip
           mkdir -p 3rdparty/ncnn-android-vulkan-shared
-          cp -r ncnn-20230816-android-vulkan/* 3rdparty/ncnn-android-vulkan-shared/
+          cp -r ncnn-20230816-android/* 3rdparty/ncnn-android-vulkan-shared/
 
           wget -q https://github.com/opencv/opencv/releases/download/4.6.0/opencv-4.6.0-android-sdk.zip
           unzip -q opencv-4.6.0-android-sdk.zip
 
-          echo "=== ncnn structure ==="
+          echo "=== ncnn cmake ==="
           find 3rdparty/ncnn-android-vulkan-shared -name "ncnnConfig.cmake" | sort
-          echo "=== opencv structure ==="
-          find OpenCV-android-sdk -name "OpenCVConfig.cmake" | sort
 
       - name: Generate and build colorize-ncnn
         run: |
-          python3 colorize-gen.py \
-            "$(find 3rdparty/ncnn-android-vulkan-shared -name 'ncnnConfig.cmake' | grep arm64 | head -1 | xargs dirname)" \
-            "$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | head -1 | xargs dirname)"
+          NCNN_DIR=$(find 3rdparty/ncnn-android-vulkan-shared -name 'ncnnConfig.cmake' | grep arm64 | head -1 | xargs dirname)
+          OPENCV_DIR=$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | head -1 | xargs dirname)
+          echo "NCNN=$NCNN_DIR OPENCV=$OPENCV_DIR"
+          python3 colorize-gen.py "$NCNN_DIR" "$OPENCV_DIR"
 
           mkdir -p colorize-build
           cmake -S colorize-src -B colorize-build \
@@ -72,6 +71,11 @@ jobs:
           size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin")
           [ "$size" -lt 1000000 ] && echo "ERROR: model too small" && exit 1
           echo "Assets ready ✓"
+
+      - name: Setup realsr 3rdparty
+        run: |
+          mkdir -p 3rdparty/ncnn-android-vulkan-shared
+          cp -r ncnn-20230816-android/* 3rdparty/ncnn-android-vulkan-shared/ 2>/dev/null || true
 
       - name: Build APK
         run: |
