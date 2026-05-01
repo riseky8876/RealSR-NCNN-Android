@@ -29,17 +29,13 @@ jobs:
 
       - name: Setup ncnn and OpenCV
         run: |
-          # Use ncnn WITHOUT Vulkan to avoid Vulkan SDK dependency on CI
           wget -q https://github.com/Tencent/ncnn/releases/download/20230816/ncnn-20230816-android.zip
           unzip -q ncnn-20230816-android.zip
           mkdir -p 3rdparty/ncnn-android-vulkan-shared
           cp -r ncnn-20230816-android/* 3rdparty/ncnn-android-vulkan-shared/
-
           wget -q https://github.com/opencv/opencv/releases/download/4.6.0/opencv-4.6.0-android-sdk.zip
           unzip -q opencv-4.6.0-android-sdk.zip
-
-          echo "=== ncnn cmake ==="
-          find 3rdparty/ncnn-android-vulkan-shared -name "ncnnConfig.cmake" | sort
+          echo "ncnn:" && find 3rdparty/ncnn-android-vulkan-shared -name "ncnnConfig.cmake"
 
       - name: Generate and build colorize-ncnn
         run: |
@@ -47,7 +43,6 @@ jobs:
           OPENCV_DIR=$(find OpenCV-android-sdk -name 'OpenCVConfig.cmake' | grep arm64 | head -1 | xargs dirname)
           echo "NCNN=$NCNN_DIR OPENCV=$OPENCV_DIR"
           python3 colorize-gen.py "$NCNN_DIR" "$OPENCV_DIR"
-
           mkdir -p colorize-build
           cmake -S colorize-src -B colorize-build \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
@@ -61,15 +56,35 @@ jobs:
           echo "colorize-ncnn built ✓"
 
       - name: Copy binary and model to assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ASSETS=RealSR-NCNN-Android-GUI/app/src/main/assets/realsr
           mkdir -p "$ASSETS/colorize-models"
           cp colorize-build/colorize-ncnn "$ASSETS/colorize-ncnn"
-          curl -sL "https://raw.githubusercontent.com/nihui/ncnn-assets/master/models/siggraph17_color_sim.param" -o "$ASSETS/colorize-models/siggraph17_color_sim.param"
-          curl -sL "https://raw.githubusercontent.com/nihui/ncnn-assets/master/models/siggraph17_color_sim.bin" -o "$ASSETS/colorize-models/siggraph17_color_sim.bin"
+
+          # Download siggraph17 model from pictureupgrader release
+          # (already uploaded there previously)
+          MODEL_REPO="riseky8876/pictureupgrader"
+          TAG=$(gh release list --repo "$MODEL_REPO" --limit 5 \
+                --json tagName --jq '.[].tagName' | head -5 | while read t; do
+            if gh release view "$t" --repo "$MODEL_REPO" > /dev/null 2>&1; then
+              echo "$t"; break
+            fi
+          done)
+          echo "Using tag: $TAG from $MODEL_REPO"
+
+          gh release download "$TAG" \
+            --repo "$MODEL_REPO" \
+            --pattern "siggraph17_color_sim.*" \
+            --dir "$ASSETS/colorize-models" \
+            --clobber
+
+          echo "=== Model files ==="
           ls -lh "$ASSETS/colorize-models/"
-          size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin")
-          [ "$size" -lt 1000000 ] && echo "ERROR: model too small" && exit 1
+
+          size=$(stat -c%s "$ASSETS/colorize-models/siggraph17_color_sim.bin" 2>/dev/null || echo 0)
+          [ "$size" -lt 1000000 ] && echo "ERROR: model too small ($size bytes)" && exit 1
           echo "Assets ready ✓"
 
       - name: Setup realsr 3rdparty
